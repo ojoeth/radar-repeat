@@ -1,0 +1,15 @@
+{
+  "lsp": {
+    "gopls": {
+      "settings": {
+        "buildFlags": [
+          "-target=/var/home/joe/src/radar-repeat/src/nicenano-s340.json",
+        ],
+        "env": {
+          "GOOS": "linux",
+          "GOARCH": "arm",
+        },
+      },
+    },
+  },
+}

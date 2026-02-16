@@ -1,0 +1,5 @@
+-I./lib/s340/include
+-I./lib/nrf_headers/device
+-I./lib/nrf_headers/cmsis
+-I./lib/nrf_headers/mdk
+-DNRF52840_XXAA

@@ -1,0 +1,8 @@
+{
+  "inherits": ["nrf52840", "nrf52840-s340v7-uf2"],
+  "linkerscript": "targets/nrf52840-s340v7-uf2.ld",
+  "flash-offset": "0x31000",
+  "ram-offset": "0xA000",
+  "build-tags": ["nicenano"],
+  "msd-volume-name": ["NICENANO"]
+}

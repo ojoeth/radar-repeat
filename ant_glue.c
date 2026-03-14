@@ -23,9 +23,21 @@ uint32_t enable_softdevice() {
 
     const char* license = "3831-521d-7df9-24d8-eff3-467b-225f-a00e";
 
+    static uint8_t ant_stack_buffer[512];
+    ANT_ENABLE ant_enable_cfg = {
+        .ucTotalNumberOfChannels = 5,
+        .ucNumberOfEncryptedChannels = 0,
+        .usNumberOfEvents = 48,
+        .pucMemoryBlockStartLocation = ant_stack_buffer,
+        .usMemoryBlockByteSize = sizeof(ant_stack_buffer)
+    };
+
+
     err = sd_softdevice_enable(&clock_cfg, softdevice_fault_handler, license);
     if (err != 0) return err;
 
+    err = sd_ant_enable(&ant_enable_cfg);
+    if (err != 0) return err;
     return err;
 }
 
@@ -40,7 +52,7 @@ uint32_t setup_radar_channel() {
     if (err != 0) return err;
 
     // Device Number (random 16-bit), Device Type (40), Trans Type (1)
-    err = sd_ant_channel_id_set(0, 10101, 40, 1);
+    err = sd_ant_channel_id_set(0, 10102, 40, 1);
     if (err != 0) return err;
 
     err = sd_ant_channel_radio_freq_set(0, 57);
@@ -50,6 +62,29 @@ uint32_t setup_radar_channel() {
     if (err != 0) return err;
 
     return sd_ant_channel_open(0);
+}
+
+uint32_t setup_radar_receive_channel(uint32_t channel_num) {
+    uint32_t err;
+
+    // Clean up channel if it exists (ignore errors if not assigned)
+    sd_ant_channel_close(channel_num);
+    sd_ant_channel_unassign(channel_num);
+
+    // Channel uses network 0 (already configured)
+    err = sd_ant_channel_assign(channel_num, CHANNEL_TYPE_SLAVE, 0, 0);
+    if (err != 0) return err+1000000;
+
+    err = sd_ant_channel_id_set(channel_num, 0, 40, 0);
+    if (err != 0) return err+2000000;
+
+    err = sd_ant_channel_radio_freq_set(channel_num, 57);
+    if (err != 0) return err+3000000;
+
+    err = sd_ant_channel_period_set(channel_num, 4084);
+    if (err != 0) return err+4000000;
+
+    return sd_ant_channel_open(channel_num);
 }
 
 uint32_t send_radar_update(uint8_t * p_data) {
@@ -64,4 +99,17 @@ void process_ant_events() {
     while(sd_ant_event_get(&ant_channel, &event_message_buffer[0], NULL) == NRF_SUCCESS) {
         // Process or just clear the event
     }
+}
+
+uint32_t get_ant_event(uint8_t *channel, uint8_t *event, uint8_t *data) {
+    ANT_MESSAGE ant_msg;
+    uint32_t err = sd_ant_event_get(channel, event, (uint8_t *)&ant_msg);
+
+    if (err == 0) {
+        // Payload[0] is channel, Payload[1-8] is the data
+        for(int i = 0; i < 8; i++) {
+            data[i] = ant_msg.ANT_MESSAGE_aucPayload[i];
+        }
+    }
+    return err;
 }

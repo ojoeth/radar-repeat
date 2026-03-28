@@ -41,7 +41,7 @@ uint32_t enable_softdevice() {
     return err;
 }
 
-uint32_t setup_radar_channel() {
+uint32_t setup_radar_channel(uint16_t device_num) {
     uint32_t err;
     // 1. Set the Network Key on Network 0
     err = sd_ant_network_address_set(0, ANT_PLUS_NETWORK_KEY);
@@ -52,7 +52,7 @@ uint32_t setup_radar_channel() {
     if (err != 0) return err;
 
     // Device Number (random 16-bit), Device Type (40), Trans Type (1)
-    err = sd_ant_channel_id_set(0, 10102, 40, 1);
+    err = sd_ant_channel_id_set(0, device_num, 40, 1);
     if (err != 0) return err;
 
     err = sd_ant_channel_radio_freq_set(0, 57);
@@ -112,4 +112,9 @@ uint32_t get_ant_event(uint8_t *channel, uint8_t *event, uint8_t *data) {
         }
     }
     return err;
+}
+
+uint32_t wait_for_ant_event(uint8_t *channel, uint8_t *event, uint8_t *data) {
+    sd_app_evt_wait();
+    return get_ant_event(channel, event, data);
 }

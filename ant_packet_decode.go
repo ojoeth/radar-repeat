@@ -11,7 +11,6 @@ package main
 */
 import "C"
 import (
-	"fmt"
 	"time"
 )
 
@@ -116,30 +115,30 @@ func (data RadarPkt) ToBytes() [8]byte {
 	return pkt
 }
 
-func ant_init() {
-	println("Setting up RADAR ANT+")
+func ant_init(radarDeviceNum int) {
+	debug("Setting up RADAR ANT+")
 
 	res := C.enable_softdevice()
 	if res != 0 {
 		time.Sleep(time.Second)
-		println("FAILED: enable softdevice returned error code: 0x", uint32(res))
+		debug("FAILED: enable softdevice returned error code: 0x", uint32(res))
 	} else {
-		println("Setting up soft device success")
+		debug("Setting up soft device success")
 	}
 
-	e := C.setup_radar_channel()
+	e := C.setup_radar_channel(uint16(radarDeviceNum))
 	if e != 0 {
-		println("FAILED: Setup returned error code: 0x", uint32(e))
+		debug("FAILED: Setup returned error code: 0x", uint32(e))
 	} else {
-		println("Setting up radar chan success")
+		debug("Setting up radar chan success")
 	}
 
 	for i := 1; i <= 4; i++ {
 		e = C.setup_radar_receive_channel(uint32(i))
 		if e != 0 {
-			println("FAILED: Setup of channel", i, "returned error code: 0x", uint32(e))
+			debug("FAILED: Setup of channel", i, "returned error code: 0x", uint32(e))
 		} else {
-			println("Setting up radar scan channel", i, "success")
+			debug("Setting up radar scan channel", i, "success")
 		}
 	}
 
@@ -151,7 +150,7 @@ func pollEvents(radarChan chan RadarPkt) {
 	var data [8]byte
 
 	for {
-		err := C.get_ant_event(
+		err := C.wait_for_ant_event(
 			(*C.uint8_t)(&channel),
 			(*C.uint8_t)(&event),
 			(*C.uint8_t)(&data[0]),
@@ -159,8 +158,6 @@ func pollEvents(radarChan chan RadarPkt) {
 
 		if err == 0 {
 			handleEvent(radarChan, channel, event, data)
-		} else {
-			time.Sleep(1 * time.Millisecond)
 		}
 	}
 }
@@ -168,35 +165,25 @@ func pollEvents(radarChan chan RadarPkt) {
 func handleEvent(radarChan chan RadarPkt, channel uint8, event uint8, data [8]byte) {
 	switch event {
 	case 0x4E: // MESG_BROADCAST_DATA_ID
-		fmt.Printf("Radar Data Received: %v\n", data)
+		//println("Radar Data Received: ", data)
 	case 0x40: // MESG_RESPONSE_EVENT_ID
 		eventCode := data[0]
 		if eventCode == 3 {
 			// Just a successful transmit, maybe ignore this.
 		} else if eventCode == 1 {
-			fmt.Println("Search timed out. No radars nearby.")
+			debug("Search timed out. No radars nearby.")
 		}
-	}
-	if event == 7 {
-		println("Channel ", channel, "dropped. Restarting...")
+	case 7:
+		debug("Channel ", channel, "dropped. Restarting...")
+		time.Sleep(time.Second)
 		C.setup_radar_receive_channel(uint32(channel))
-	}
-	if event == 0x80 {
+	case 1:
+		debug("Channel ", channel, "dropped. Restarting...")
+		time.Sleep(3 * time.Second)
+		C.setup_radar_receive_channel(uint32(channel))
+	case 0x80:
 		if data[0] == 0x30 {
 			radarChan <- RadarPktFromBytes(data)
-		}
-	}
-}
-
-func RebroadcastThreats(liveRadarChan chan RadarPkt, sendRadarChan chan RadarPkt) {
-	packets := []RadarPkt{}
-	for {
-		receivedPkt := <-liveRadarChan
-		packets = append(packets, receivedPkt)
-		if len(packets) == 4 {
-			toSend := ConsolidateThreats(packets)
-			sendRadarChan <- toSend
-			packets = []RadarPkt{}
 		}
 	}
 }
@@ -232,11 +219,11 @@ func processAntRadar(radar chan RadarPkt) {
 			msg = msg + string(uint8(i))
 		}
 		if err != 0 {
-			println("Error sending update: ", err)
+			debug("Error sending update: ", err)
 		}
 		//C.process_ant_events()
 		count++
-		time.Sleep(8 * time.Millisecond)
+		time.Sleep(125 * time.Millisecond)
 	}
 }
 

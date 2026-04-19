@@ -11,8 +11,14 @@ package main
 */
 import "C"
 import (
+	"sync"
+	"sync/atomic"
 	"time"
 )
+
+const NUMBER_OF_CHANS = 8 // Hardcoded at 8. Do not change.
+var channelRestarting [8]atomic.Bool
+var antInitOnce sync.Once
 
 type Threat struct {
 	ThreatLevel  int     // 0=none, 1=approaching, 2=fast approach
@@ -23,6 +29,17 @@ type Threat struct {
 
 type RadarPkt struct {
 	Threats [4]Threat
+}
+
+func checkAndRestartDeadChannels() {
+	for chanNum := 1; chanNum < NUMBER_OF_CHANS; chanNum++ {
+		status := uint8(C.get_channel_status(C.uint8_t(uint8(chanNum))))
+		if status == 0x00 || status == 0x01 { // unassigned or assigned-but-not-open
+			if channelRestarting[chanNum].CompareAndSwap(false, true) {
+				go restartChannelWithDelay(uint8(chanNum), 0)
+			}
+		}
+	}
 }
 
 func RadarPktFromBytes(pkt [8]byte) RadarPkt {
@@ -116,32 +133,40 @@ func (data RadarPkt) ToBytes() [8]byte {
 }
 
 func ant_init(radarDeviceNum int) {
-	debug("Setting up RADAR ANT+")
+	antInitOnce.Do(func() { // Ensure this only gets called once!
+		debug("Setting up RADAR ANT+")
 
-	res := C.enable_softdevice()
-	if res != 0 {
-		time.Sleep(time.Second)
-		debug("FAILED: enable softdevice returned error code: 0x", uint32(res))
-	} else {
-		debug("Setting up soft device success")
-	}
-
-	e := C.setup_radar_channel(uint16(radarDeviceNum))
-	if e != 0 {
-		debug("FAILED: Setup returned error code: 0x", uint32(e))
-	} else {
-		debug("Setting up radar chan success")
-	}
-
-	for i := 1; i <= 4; i++ {
-		e = C.setup_radar_receive_channel(uint32(i))
-		if e != 0 {
-			debug("FAILED: Setup of channel", i, "returned error code: 0x", uint32(e))
+		res := C.enable_softdevice()
+		if res != 0 {
+			time.Sleep(time.Second)
+			debug("FAILED: enable softdevice returned error code: 0x", uint32(res))
 		} else {
-			debug("Setting up radar scan channel", i, "success")
+			debug("Setting up soft device success")
 		}
-	}
 
+		e := C.setup_radar_channel(uint16(radarDeviceNum))
+		if e != 0 {
+			debug("FAILED: Setup returned error code: 0x", uint32(e))
+		} else {
+			debug("Setting up radar chan success")
+		}
+
+		for i := 1; i <= NUMBER_OF_CHANS-1; i++ {
+			e = C.setup_radar_receive_channel(uint32(i))
+			if e != 0 {
+				debug("FAILED: Setup of channel", i, "returned error code: 0x", uint32(e))
+			} else {
+				debug("Setting up radar scan channel", i, "success")
+			}
+		}
+
+		go func() {
+			for {
+				time.Sleep(time.Minute)
+				checkAndRestartDeadChannels()
+			}
+		}()
+	})
 }
 
 func pollEvents(radarChan chan RadarPkt) {
@@ -173,19 +198,32 @@ func handleEvent(radarChan chan RadarPkt, channel uint8, event uint8, data [8]by
 		} else if eventCode == 1 {
 			debug("Search timed out. No radars nearby.")
 		}
-	case 7:
-		debug("Channel ", channel, "dropped. Restarting...")
-		time.Sleep(time.Second)
-		C.setup_radar_receive_channel(uint32(channel))
-	case 1:
-		debug("Channel ", channel, "dropped. Restarting...")
-		time.Sleep(3 * time.Second)
-		C.setup_radar_receive_channel(uint32(channel))
-	case 0x80:
-		if data[0] == 0x30 {
+	case 1: // timed out
+		if channel > 0 && int(channel) < len(channelRestarting) {
+			if channelRestarting[channel].CompareAndSwap(false, true) {
+				go restartChannelWithDelay(channel, 30*time.Second)
+			}
+		}
+	case 0x07, 0x08, 0x0B: // chan closed
+		if channel > 0 && int(channel) < len(channelRestarting) {
+			if channelRestarting[channel].CompareAndSwap(false, true) {
+				go restartChannelWithDelay(channel, 3*time.Second)
+			}
+		}
+	case 0x35:
+		checkAndRestartDeadChannels()
+	case 0x80: // actual packet
+		if data[0] == 0x30 { // radar pkt
 			radarChan <- RadarPktFromBytes(data)
 		}
 	}
+}
+
+func restartChannelWithDelay(channel uint8, delay time.Duration) {
+	defer channelRestarting[channel].Store(false)
+	debug("Channel ", channel, "dropped. Restarting...")
+	time.Sleep(delay)
+	C.setup_radar_receive_channel(uint32(channel))
 }
 
 func processAntRadar(radar chan RadarPkt) {

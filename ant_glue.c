@@ -15,19 +15,19 @@ uint32_t enable_softdevice() {
     uint32_t err;
 
     nrf_clock_lf_cfg_t clock_cfg = {
-        .source        = NRF_CLOCK_LF_SRC_RC,
-        .rc_ctiv       = 16,
-        .rc_temp_ctiv  = 2,
-        .accuracy      = 7
+        .source       = NRF_CLOCK_LF_SRC_XTAL,
+        .rc_ctiv      = 0,
+        .rc_temp_ctiv = 0,
+        .accuracy     = NRF_CLOCK_LF_ACCURACY_20_PPM
     };
 
     const char* license = "3831-521d-7df9-24d8-eff3-467b-225f-a00e";
 
-    static uint8_t ant_stack_buffer[512];
+    static uint8_t ant_stack_buffer[ANT_ENABLE_GET_REQUIRED_SPACE(8, 0, 64, 64)];
     ANT_ENABLE ant_enable_cfg = {
-        .ucTotalNumberOfChannels = 5,
+        .ucTotalNumberOfChannels = 8,
         .ucNumberOfEncryptedChannels = 0,
-        .usNumberOfEvents = 48,
+        .usNumberOfEvents = 64,
         .pucMemoryBlockStartLocation = ant_stack_buffer,
         .usMemoryBlockByteSize = sizeof(ant_stack_buffer)
     };
@@ -117,4 +117,10 @@ uint32_t get_ant_event(uint8_t *channel, uint8_t *event, uint8_t *data) {
 uint32_t wait_for_ant_event(uint8_t *channel, uint8_t *event, uint8_t *data) {
     sd_app_evt_wait();
     return get_ant_event(channel, event, data);
+}
+
+uint8_t get_channel_status(uint8_t channel) {
+    uint8_t status;
+    sd_ant_channel_status_get(channel, &status);
+    return status;
 }
